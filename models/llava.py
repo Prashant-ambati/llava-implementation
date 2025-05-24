@@ -67,9 +67,7 @@ class LLaVA(nn.Module):
         vision_model_path: str = "openai/clip-vit-large-patch14-336",
         language_model_path: str = "lmsys/vicuna-7b-v1.5",
         projection_hidden_dim: int = 4096,
-        device: str = None,
-        load_in_8bit: bool = False,
-        load_in_4bit: bool = False,
+        device: str = None
     ):
         """
         Initialize the LLaVA model.
@@ -78,31 +76,22 @@ class LLaVA(nn.Module):
             vision_model_path: Path or name of the vision model
             language_model_path: Path or name of the language model
             projection_hidden_dim: Hidden dimension of the projection layer
-            device: Device to load the model on ('cuda', 'cpu', etc.)
-            load_in_8bit: Whether to load the language model in 8-bit precision
-            load_in_4bit: Whether to load the language model in 4-bit precision
+            device: Device to load the model on ('cpu' only for Hugging Face Spaces)
         """
         super().__init__()
         
-        self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = 'cpu'
         
         # Load vision model
         self.vision_model = CLIPVisionModel.from_pretrained(vision_model_path)
         self.image_processor = CLIPImageProcessor.from_pretrained(vision_model_path)
         
-        # Load language model
-        kwargs = {}
-        if load_in_8bit:
-            kwargs['load_in_8bit'] = True
-        elif load_in_4bit:
-            kwargs['load_in_4bit'] = True
-            kwargs['bnb_4bit_compute_dtype'] = torch.float16
-        
+        # Load language model (always float32, cpu)
         self.tokenizer = AutoTokenizer.from_pretrained(language_model_path)
         self.language_model = AutoModelForCausalLM.from_pretrained(
             language_model_path,
-            torch_dtype=torch.float16,
-            **kwargs
+            torch_dtype=torch.float32,
+            device_map=None
         )
         
         # Set padding token if not set
