@@ -3,7 +3,11 @@ Configuration settings for the LLaVA implementation.
 """
 
 import os
+import torch
 from pathlib import Path
+from ..utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 # Project paths
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -14,7 +18,13 @@ EXAMPLES_DIR = PROJECT_ROOT / "examples"
 # Model settings
 MODEL_NAME = "liuhaotian/llava-v1.5-7b"
 MODEL_REVISION = "main"
-DEVICE = "cuda" if os.environ.get("CUDA_VISIBLE_DEVICES") else "cpu"
+
+# Device detection
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+if DEVICE == "cuda":
+    logger.info(f"Using CUDA device: {torch.cuda.get_device_name(0)}")
+else:
+    logger.info("CUDA not available, using CPU")
 
 # Generation settings
 DEFAULT_MAX_NEW_TOKENS = 512

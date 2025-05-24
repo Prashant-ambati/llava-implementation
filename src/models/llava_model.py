@@ -16,20 +16,39 @@ class LLaVAModel:
     
     def __init__(self):
         """Initialize the LLaVA model and processor."""
-        logger.info(f"Initializing LLaVA model from {MODEL_NAME}")
-        self.processor = AutoProcessor.from_pretrained(
-            MODEL_NAME,
-            revision=MODEL_REVISION,
-            trust_remote_code=True
-        )
-        self.model = AutoModelForCausalLM.from_pretrained(
-            MODEL_NAME,
-            revision=MODEL_REVISION,
-            torch_dtype=torch.float16,
-            device_map="auto",
-            trust_remote_code=True
-        )
-        logger.info("Model initialization complete")
+        try:
+            logger.info(f"Initializing LLaVA model from {MODEL_NAME}")
+            logger.info(f"Using device: {DEVICE}")
+            
+            # Initialize processor
+            self.processor = AutoProcessor.from_pretrained(
+                MODEL_NAME,
+                revision=MODEL_REVISION,
+                trust_remote_code=True
+            )
+            
+            # Set model dtype based on device
+            model_dtype = torch.float32 if DEVICE == "cpu" else torch.float16
+            
+            # Initialize model with appropriate settings
+            self.model = AutoModelForCausalLM.from_pretrained(
+                MODEL_NAME,
+                revision=MODEL_REVISION,
+                torch_dtype=model_dtype,
+                device_map="auto" if DEVICE == "cuda" else None,
+                trust_remote_code=True,
+                low_cpu_mem_usage=True
+            )
+            
+            # Move model to device if not using device_map
+            if DEVICE == "cpu":
+                self.model = self.model.to(DEVICE)
+            
+            logger.info("Model initialization complete")
+            
+        except Exception as e:
+            logger.error(f"Error initializing model: {str(e)}")
+            raise
     
     def generate_response(
         self,
