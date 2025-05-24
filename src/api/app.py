@@ -7,6 +7,10 @@ from PIL import Image
 import os
 import tempfile
 import torch
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+import traceback
+import sys
 
 from ..configs.settings import (
     GRADIO_THEME,
@@ -26,6 +30,18 @@ from ..utils.logging import setup_logging, get_logger
 # Set up logging
 setup_logging()
 logger = get_logger(__name__)
+
+# Initialize FastAPI app
+app = FastAPI(title="LLaVA Web Interface")
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Initialize model
 model = None
@@ -50,7 +66,9 @@ def initialize_model():
         logger.info(f"Model initialized on {model.device}")
         return True
     except Exception as e:
-        logger.error(f"Error initializing model: {e}")
+        error_msg = f"Error initializing model: {str(e)}\n{traceback.format_exc()}"
+        logger.error(error_msg)
+        print(error_msg, file=sys.stderr)
         return False
 
 def process_image(
@@ -74,8 +92,21 @@ def process_image(
         str: Model response
     """
     if not model:
-        return "Error: Model not initialized"
+        error_msg = "Error: Model not initialized"
+        logger.error(error_msg)
+        return error_msg
     
+    if image is None:
+        error_msg = "Error: No image provided"
+        logger.error(error_msg)
+        return error_msg
+    
+    if not prompt or not prompt.strip():
+        error_msg = "Error: No prompt provided"
+        logger.error(error_msg)
+        return error_msg
+    
+    temp_path = None
     try:
         logger.info(f"Processing image with prompt: {prompt[:100]}...")
         
@@ -97,19 +128,30 @@ def process_image(
                 top_p=top_p
             )
 
-        # Clean up temporary file
-        os.unlink(temp_path)
-        
-        # Clear memory after processing
-        torch.cuda.empty_cache()
-        
         logger.info("Successfully generated response")
         return response
-    except Exception as e:
-        logger.error(f"Error processing image: {str(e)}")
-        return f"Error: {str(e)}"
 
-def create_interface() -> gr.Interface:
+    except Exception as e:
+        error_msg = f"Error processing image: {str(e)}\n{traceback.format_exc()}"
+        logger.error(error_msg)
+        print(error_msg, file=sys.stderr)
+        return f"Error: {str(e)}"
+    
+    finally:
+        # Clean up temporary file
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except Exception as e:
+                logger.warning(f"Error cleaning up temporary file: {str(e)}")
+        
+        # Clear memory after processing
+        try:
+            torch.cuda.empty_cache()
+        except Exception as e:
+            logger.warning(f"Error clearing CUDA cache: {str(e)}")
+
+def create_interface() -> gr.Blocks:
     """Create and return the Gradio interface."""
     with gr.Blocks(theme=GRADIO_THEME) as interface:
         gr.Markdown(f"""# {GRADIO_TITLE}
@@ -180,31 +222,42 @@ Try these prompts to get started:
         generate_btn.click(
             fn=process_image,
             inputs=[
-                gr.Image(type="pil"),
-                gr.Textbox(),
-                gr.Slider(),
-                gr.Slider(),
-                gr.Slider()
+                image_input,
+                prompt_input,
+                max_tokens,
+                temperature,
+                top_p
             ],
-            outputs=gr.Textbox()
+            outputs=output,
+            api_name="process_image"
         )
     
     return interface
 
+# Create Gradio app
+demo = create_interface()
+
+# Mount Gradio app
+app = gr.mount_gradio_app(app, demo, path="/")
+
 def main():
-    """Run the Gradio interface."""
-    interface = create_interface()
-    interface.launch(
-        server_name=API_HOST,
-        server_port=API_PORT,
-        share=True,
-        show_error=True,
-        show_api=False
+    """Run the FastAPI application."""
+    import uvicorn
+    
+    # Initialize model
+    if not initialize_model():
+        logger.error("Failed to initialize model. Exiting...")
+        sys.exit(1)
+    
+    # Start the server
+    uvicorn.run(
+        app,
+        host=API_HOST,
+        port=API_PORT,
+        workers=API_WORKERS,
+        reload=API_RELOAD,
+        log_level="info"
     )
 
 if __name__ == "__main__":
-    # Initialize model
-    if initialize_model():
-        main()
-    else:
-        print("Failed to initialize model. Exiting...") 
+    main() 
