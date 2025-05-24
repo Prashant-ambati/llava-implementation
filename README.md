@@ -253,5 +253,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 📞 Contact
 
 - GitHub Issues: [Report a bug](https://github.com/Prashant-ambati/llava-implementation/issues)
-- Email: [Your Email]
-- Twitter: [@YourTwitter]
+- Email: prashantambati12@gmail.com
