@@ -4,6 +4,9 @@ Gradio interface for the LLaVA model.
 
 import gradio as gr
 from PIL import Image
+import os
+import tempfile
+import torch
 
 from ..configs.settings import (
     GRADIO_THEME,
@@ -25,7 +28,30 @@ setup_logging()
 logger = get_logger(__name__)
 
 # Initialize model
-model = LLaVAModel()
+model = None
+
+def initialize_model():
+    global model
+    try:
+        logger.info("Initializing LLaVA model...")
+        # Use a smaller model variant and enable memory optimizations
+        model = LLaVAModel(
+            vision_model_path="openai/clip-vit-base-patch32",  # Smaller vision model
+            language_model_path="TinyLlama/TinyLlama-1.1B-Chat-v1.0",  # Smaller language model
+            device="cpu",  # Force CPU for Hugging Face Spaces
+            projection_hidden_dim=2048  # Reduce projection layer size
+        )
+        
+        # Enable memory optimizations
+        torch.cuda.empty_cache()  # Clear any cached memory
+        if hasattr(model, 'language_model'):
+            model.language_model.config.use_cache = False  # Disable KV cache
+        
+        logger.info(f"Model initialized on {model.device}")
+        return True
+    except Exception as e:
+        logger.error(f"Error initializing model: {e}")
+        return False
 
 def process_image(
     image: Image.Image,
@@ -47,15 +73,36 @@ def process_image(
     Returns:
         str: Model response
     """
+    if not model:
+        return "Error: Model not initialized"
+    
     try:
         logger.info(f"Processing image with prompt: {prompt[:100]}...")
-        response = model(
-            image=image,
-            prompt=prompt,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            top_p=top_p
-        )
+        
+        # Save the uploaded image temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_file:
+            image.save(temp_file.name)
+            temp_path = temp_file.name
+
+        # Clear memory before processing
+        torch.cuda.empty_cache()
+        
+        # Generate response with reduced memory usage
+        with torch.inference_mode():  # More memory efficient than no_grad
+            response = model(
+                image=image,
+                prompt=prompt,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                top_p=top_p
+            )
+
+        # Clean up temporary file
+        os.unlink(temp_path)
+        
+        # Clear memory after processing
+        torch.cuda.empty_cache()
+        
         logger.info("Successfully generated response")
         return response
     except Exception as e:
@@ -129,17 +176,17 @@ Try these prompts to get started:
                     show_copy_button=True
                 )
         
-        # Set up event handlers
+        # Set up event handlers with explicit types
         generate_btn.click(
             fn=process_image,
             inputs=[
-                image_input,
-                prompt_input,
-                max_tokens,
-                temperature,
-                top_p
+                gr.Image(type="pil"),
+                gr.Textbox(),
+                gr.Slider(),
+                gr.Slider(),
+                gr.Slider()
             ],
-            outputs=output
+            outputs=gr.Textbox()
         )
     
     return interface
@@ -156,4 +203,8 @@ def main():
     )
 
 if __name__ == "__main__":
-    main() 
+    # Initialize model
+    if initialize_model():
+        main()
+    else:
+        print("Failed to initialize model. Exiting...") 
